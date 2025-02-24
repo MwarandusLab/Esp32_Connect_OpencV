@@ -7,9 +7,15 @@
 const char* ssid = "TRUSTKISIA-TECH";
 const char* password = "37526308";
 
-int Green_Led = 26;
-int Red_Led = 14;
+#define PIR_SENSOR_PIN 18
+
+int Green_Led = 14;
+int Red_Led = 26;
 int Blue_Led = 33;
+int Sms = 0;
+
+unsigned long MotiontimerStart = 0;
+const unsigned long TIMER_DURATION = 15000;
 
 enum State {
   CHECK_MOTION,
@@ -20,10 +26,10 @@ enum State {
 
 State currentState = CHECK_MOTION;
 
-// Static IP configuration
-IPAddress local_IP(192, 168, 100, 132);
-IPAddress gateway(192, 168, 100, 1);
-IPAddress subnet(255, 255, 255, 0);
+// Static IP configuration uncomment this when working with a Router and leave it commented when working with mobile hotspot
+// IPAddress local_IP(192, 168, 100, 132);
+// IPAddress gateway(192, 168, 100, 1);
+// IPAddress subnet(255, 255, 255, 0);
 
 
 unsigned long previousMillis = 0;
@@ -34,6 +40,7 @@ HardwareSerial GSM(1);
 
 void setup() {
   Serial.begin(9600);
+  pinMode(PIR_SENSOR_PIN, INPUT);
   GSM.begin(9600, SERIAL_8N1, 17, 16);
 
   delay(1000);
@@ -49,18 +56,18 @@ void setup() {
   Serial.println("Initializing GSM...");
   delay(10);
 
-  pinMode(Green_Led, OUTPUT;);
+  pinMode(Green_Led, OUTPUT);
   pinMode(Red_Led, OUTPUT);
   pinMode(Blue_Led, OUTPUT);
 
   digitalWrite(Green_Led, LOW);
   digitalWrite(Red_Led, HIGH);
   digitalWrite(Blue_Led, LOW);
- 
+
   // Connect to Wi-Fi with static IP
-  if (!WiFi.config(local_IP, gateway, subnet)) {
-    Serial.println("Failed to configure static IP!");
-  }
+  // if (!WiFi.config(local_IP, gateway, subnet)) {
+  //   Serial.println("Failed to configure static IP!");
+  // }
 
   // Connect to Wi-Fi
   connectToWiFi();
@@ -72,6 +79,9 @@ void setup() {
 }
 
 void loop() {
+  // handlePostRequest();
+  // Serial.print("ESP32 IP Address: ");
+  // Serial.println(WiFi.localIP());
   runEverySecond();
 
   switch (currentState) {
@@ -81,21 +91,35 @@ void loop() {
     case CHECK_CAMERA:
       check_camera();
       break;
-    case SEND_ALERT:
-      send_alert();
-      break;
     case RESET_SYSTEM:
       reset_system();
       break;
   }
 }
 void check_motion() {
+  int motionDetected = digitalRead(PIR_SENSOR_PIN);  // Read PIR sensor state
+
+  if (motionDetected == HIGH) {  // If motion is detected
+    Serial.println("Motion detected! LED ON");
+    digitalWrite(Blue_Led, HIGH);
+    MotiontimerStart = millis();
+    currentState = CHECK_CAMERA;
+  } else {
+    digitalWrite(Blue_Led, LOW);
+    Serial.println("No motion detected. LED OFF");
+  }
+
+  delay(500);
 }
 
 void check_camera() {
-  server.handleClient();  // Handle incoming client requests
-}
-void send_alert() {
+  if (millis() - MotiontimerStart >= TIMER_DURATION) {
+    Serial.println("Timer Elapsed Changing to CHECK MOTION");
+    currentState = CHECK_MOTION;
+  } else {
+    Serial.println("Camera On");
+    server.handleClient();
+  }
 }
 void connectToWiFi() {
   while (WiFi.status() != WL_CONNECTED) {
@@ -106,6 +130,8 @@ void connectToWiFi() {
       Serial.print(".");
     }
     Serial.println("Connected to Wi-Fi");
+    Serial.print("ESP32 IP Address: ");
+    Serial.println(WiFi.localIP());
   }
 }
 
@@ -117,10 +143,15 @@ void handlePostRequest() {
     // Respond based on the received message
     if (message == "1") {
       Serial.println("Known face detected");
+      digitalWrite(Blue_Led, HIGH);
+      Sms = 0;
+      currentState = CHECK_MOTION;
     } else if (message == "0") {
       Serial.println("No face detected");
+      digitalWrite(Blue_Led, LOW);
     } else if (message == "2") {
-      Serial.println("Intruder detected");
+      digitalWrite(Blue_Led, HIGH);
+      Serial.println("Intruder detectedq");
       if (Sms == 0) {
         GSM.println("AT");  //Once the handshake test is successful, it will back to OK
         updateSerial();
@@ -135,6 +166,7 @@ void handlePostRequest() {
         Sms = 1;
         currentState = RESET_SYSTEM;
       }
+      currentState = RESET_SYSTEM;
     }
 
     server.send(200, "text/plain", "OK");
@@ -148,11 +180,9 @@ void reset_system() {
     Serial.println("Received message: " + message);  // print the message to the serial monitor
     if (message.indexOf("RESET") != -1) {            // if the message contains "ON"
       Serial.println("System Reseting...");
+      Sms = 0;
       currentState = CHECK_MOTION;
-    } else if (message.indexOf("OFF") != -1) {  // if the message contains "OFF"
-
-      Serial.println("Relay turned OFF.");
-    }
+    } 
   }
   delay(1000);
 }
@@ -164,10 +194,10 @@ void runEverySecond() {
     if (GSM.available()) {                             // check if there is a message available
       String message = GSM.readString();               // read the message
       Serial.println("Received message: " + message);  // print the message to the serial monitor
-      if (message.indexOf("ON") != -1) {            // if the message contains "ON"
-        digitalWrite(Red_Led, HIGH);
+      if (message.indexOf("ON") != -1) {               // if the message contains "ON"
+        digitalWrite(Green_Led, HIGH);
       } else if (message.indexOf("OFF") != -1) {  // if the message contains "OFF"
-        digitalWrite(Red_Led, LOW);
+        digitalWrite(Green_Led, LOW);
       }
     }
     delay(1000);
